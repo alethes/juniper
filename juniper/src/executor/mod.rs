@@ -60,8 +60,8 @@ where
 {
     fragments: &'a HashMap<&'a str, &'a Fragment<'a, S>>,
     variables: &'a Variables<S>,
-    current_selection_set: Option<&'a [Selection<'a, S>]>,
-    parent_selection_set: Option<&'a [Selection<'a, S>]>,
+    pub current_selection_set: Option<&'a [Selection<'a, S>]>,
+    pub parent_selection_set: Option<&'a [Selection<'a, S>]>,
     current_type: TypeType<'a, S>,
     schema: &'a SchemaType<'a, S>,
     context: &'a CtxT,
