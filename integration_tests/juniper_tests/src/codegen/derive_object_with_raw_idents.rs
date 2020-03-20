@@ -1,15 +1,9 @@
 #[cfg(test)]
-use fnv::FnvHashMap;
-#[cfg(test)]
-use juniper::Object;
-
-#[cfg(test)]
 use juniper::{
-    self, execute, graphql_value, DefaultScalarValue, EmptyMutation, GraphQLInputObject,
-    GraphQLType, RootNode, Value, Variables,
+    self, execute, graphql_value, EmptyMutation, EmptySubscription, GraphQLInputObject, RootNode,
+    Value, Variables,
 };
 
-#[cfg(feature = "async")]
 use futures;
 
 pub struct Query;
@@ -17,6 +11,7 @@ pub struct Query;
 #[juniper::graphql_object]
 impl Query {
     fn r#type(r#fn: MyInputType) -> Vec<String> {
+        let _ = r#fn;
         unimplemented!()
     }
 }
@@ -26,8 +21,8 @@ struct MyInputType {
     r#trait: String,
 }
 
-#[test]
-fn supports_raw_idents_in_types_and_args() {
+#[tokio::test]
+async fn supports_raw_idents_in_types_and_args() {
     let doc = r#"
     {
         __type(name: "Query") {
@@ -41,7 +36,7 @@ fn supports_raw_idents_in_types_and_args() {
     }
     "#;
 
-    let value = run_type_info_query(&doc);
+    let value = run_type_info_query(&doc).await;
 
     assert_eq!(
         value,
@@ -64,8 +59,8 @@ fn supports_raw_idents_in_types_and_args() {
     );
 }
 
-#[test]
-fn supports_raw_idents_in_fields_of_input_types() {
+#[tokio::test]
+async fn supports_raw_idents_in_fields_of_input_types() {
     let doc = r#"
     {
         __type(name: "MyInputType") {
@@ -76,7 +71,7 @@ fn supports_raw_idents_in_fields_of_input_types() {
     }
     "#;
 
-    let value = run_type_info_query(&doc);
+    let value = run_type_info_query(&doc).await;
 
     assert_eq!(
         value,
@@ -95,11 +90,16 @@ fn supports_raw_idents_in_fields_of_input_types() {
 }
 
 #[cfg(test)]
-fn run_type_info_query(doc: &str) -> Value {
-    let schema = RootNode::new(Query, EmptyMutation::<()>::new());
+async fn run_type_info_query(doc: &str) -> Value {
+    let schema = RootNode::new(
+        Query,
+        EmptyMutation::<()>::new(),
+        EmptySubscription::<()>::new(),
+    );
 
-    let (result, errs) =
-        execute(doc, None, &schema, &Variables::new(), &()).expect("Execution failed");
+    let (result, errs) = execute(doc, None, &schema, &Variables::new(), &())
+        .await
+        .expect("Execution failed");
 
     assert_eq!(errs, []);
 

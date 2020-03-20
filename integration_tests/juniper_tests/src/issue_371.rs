@@ -1,7 +1,6 @@
 // Original author of this test is <https://github.com/davidpdrsn>.
 use juniper::*;
 
-#[cfg(feature = "async")]
 use futures;
 
 pub struct Context;
@@ -15,13 +14,13 @@ pub struct Query;
 )]
 impl Query {
     fn users(exec: &Executor) -> Vec<User> {
-        let lh = executor.look_ahead();
+        let lh = exec.look_ahead();
         assert_eq!(lh.field_name(), "users");
         vec![User]
     }
 
     fn countries(exec: &Executor) -> Vec<Country> {
-        let lh = executor.look_ahead();
+        let lh = exec.look_ahead();
         assert_eq!(lh.field_name(), "countries");
         vec![Country]
     }
@@ -49,10 +48,10 @@ impl Country {
     }
 }
 
-type Schema = juniper::RootNode<'static, Query, EmptyMutation<Context>>;
+type Schema = juniper::RootNode<'static, Query, EmptyMutation<Context>, EmptySubscription<Context>>;
 
-#[test]
-fn users() {
+#[tokio::test]
+async fn users() {
     let ctx = Context;
 
     let query = r#"{ users { id } }"#;
@@ -60,17 +59,22 @@ fn users() {
     let (_, errors) = juniper::execute(
         query,
         None,
-        &Schema::new(Query, EmptyMutation::<Context>::new()),
+        &Schema::new(
+            Query,
+            EmptyMutation::<Context>::new(),
+            EmptySubscription::<Context>::new(),
+        ),
         &juniper::Variables::new(),
         &ctx,
     )
+    .await
     .unwrap();
 
     assert_eq!(errors.len(), 0);
 }
 
-#[test]
-fn countries() {
+#[tokio::test]
+async fn countries() {
     let ctx = Context;
 
     let query = r#"{ countries { id } }"#;
@@ -78,17 +82,18 @@ fn countries() {
     let (_, errors) = juniper::execute(
         query,
         None,
-        &Schema::new(Query, EmptyMutation::new()),
+        &Schema::new(Query, EmptyMutation::new(), EmptySubscription::new()),
         &juniper::Variables::new(),
         &ctx,
     )
+    .await
     .unwrap();
 
     assert_eq!(errors.len(), 0);
 }
 
-#[test]
-fn both() {
+#[tokio::test]
+async fn both() {
     let ctx = Context;
 
     let query = r#"
@@ -101,17 +106,22 @@ fn both() {
     let (_, errors) = juniper::execute(
         query,
         None,
-        &Schema::new(Query, EmptyMutation::<Context>::new()),
+        &Schema::new(
+            Query,
+            EmptyMutation::<Context>::new(),
+            EmptySubscription::<Context>::new(),
+        ),
         &juniper::Variables::new(),
         &ctx,
     )
+    .await
     .unwrap();
 
     assert_eq!(errors.len(), 0);
 }
 
-#[test]
-fn both_in_different_order() {
+#[tokio::test]
+async fn both_in_different_order() {
     let ctx = Context;
 
     let query = r#"
@@ -124,10 +134,15 @@ fn both_in_different_order() {
     let (_, errors) = juniper::execute(
         query,
         None,
-        &Schema::new(Query, EmptyMutation::<Context>::new()),
+        &Schema::new(
+            Query,
+            EmptyMutation::<Context>::new(),
+            EmptySubscription::<Context>::new(),
+        ),
         &juniper::Variables::new(),
         &ctx,
     )
+    .await
     .unwrap();
 
     assert_eq!(errors.len(), 0);

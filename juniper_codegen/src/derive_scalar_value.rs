@@ -50,7 +50,7 @@ impl syn::parse::Parse for TransparentAttributes {
 }
 
 impl TransparentAttributes {
-    fn from_attrs(attrs: &Vec<syn::Attribute>) -> syn::parse::Result<Self> {
+    fn from_attrs(attrs: &[syn::Attribute]) -> syn::parse::Result<Self> {
         match util::find_graphql_attr(attrs) {
             Some(attr) => {
                 let mut parsed: TransparentAttributes = attr.parse_args()?;
@@ -97,7 +97,7 @@ fn impl_scalar_struct(
         }
     };
     let inner_ty = &field.ty;
-    let name = attrs.name.unwrap_or(ident.to_string());
+    let name = attrs.name.unwrap_or_else(|| ident.to_string());
 
     let crate_name = if is_internal {
         quote!(crate)
@@ -110,7 +110,6 @@ fn impl_scalar_struct(
         None => quote!(),
     };
 
-    #[cfg(feature = "async")]
     let _async = quote!(
 
         impl <__S> #crate_name::GraphQLTypeAsync<__S> for #ident
@@ -133,9 +132,6 @@ fn impl_scalar_struct(
             }
         }
     );
-
-    #[cfg(not(feature = "async"))]
-    let _async = quote!();
 
     quote!(
         #_async

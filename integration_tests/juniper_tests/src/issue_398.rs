@@ -1,7 +1,6 @@
 // Original author of this test is <https://github.com/davidpdrsn>.
 use juniper::*;
 
-#[cfg(feature = "async")]
 use futures;
 
 struct Query;
@@ -43,10 +42,10 @@ impl Country {
     }
 }
 
-type Schema = juniper::RootNode<'static, Query, EmptyMutation<()>>;
+type Schema = juniper::RootNode<'static, Query, EmptyMutation<()>, EmptySubscription<()>>;
 
-#[test]
-fn test_lookahead_from_fragment_with_nested_type() {
+#[tokio::test]
+async fn test_lookahead_from_fragment_with_nested_type() {
     let _ = juniper::execute(
         r#"
             query Query {
@@ -62,9 +61,10 @@ fn test_lookahead_from_fragment_with_nested_type() {
             }
         "#,
         None,
-        &Schema::new(Query, EmptyMutation::new()),
+        &Schema::new(Query, EmptyMutation::new(), EmptySubscription::new()),
         &Variables::new(),
         &(),
     )
+    .await
     .unwrap();
 }

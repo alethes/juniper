@@ -8,13 +8,17 @@ enum UserKind {
 }
 
 struct User {
-    id: u64,
+    id: i32,
     name: String,
     kind: UserKind,
 }
 
 #[crate::graphql_object_internal]
 impl User {
+    async fn id(&self) -> i32 {
+        self.id
+    }
+
     async fn name(&self) -> &str {
         &self.name
     }
@@ -73,7 +77,7 @@ impl Mutation {}
 
 #[tokio::test]
 async fn async_simple() {
-    let schema = RootNode::new(Query, Mutation);
+    let schema = RootNode::new(Query, Mutation, crate::EmptySubscription::new());
     let doc = r#"
         query { 
             fieldSync
@@ -86,7 +90,7 @@ async fn async_simple() {
     "#;
 
     let vars = Default::default();
-    let (res, errs) = crate::execute_async(doc, None, &schema, &vars, &())
+    let (res, errs) = crate::execute(doc, None, &schema, &vars, &())
         .await
         .unwrap();
 

@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[doc(hidden)]
-pub static RFC3339_FORMAT: &'static str = "%Y-%m-%dT%H:%M:%S%.f%:z";
+pub static RFC3339_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f%:z";
 
 graphql_scalar!(DateTime<FixedOffset> as "DateTimeFixedOffset" where Scalar = <S>{
     description: "DateTime"
@@ -203,11 +203,14 @@ mod integration_test {
     use chrono::{prelude::*, Utc};
 
     use crate::{
-        executor::Variables, schema::model::RootNode, types::scalars::EmptyMutation, value::Value,
+        executor::Variables,
+        schema::model::RootNode,
+        types::scalars::{EmptyMutation, EmptySubscription},
+        value::Value,
     };
 
-    #[test]
-    fn test_serialization() {
+    #[tokio::test]
+    async fn test_serialization() {
         struct Root;
 
         #[crate::graphql_object_internal]
@@ -235,10 +238,15 @@ mod integration_test {
         }
         "#;
 
-        let schema = RootNode::new(Root, EmptyMutation::<()>::new());
+        let schema = RootNode::new(
+            Root,
+            EmptyMutation::<()>::new(),
+            EmptySubscription::<()>::new(),
+        );
 
-        let (result, errs) =
-            crate::execute(doc, None, &schema, &Variables::new(), &()).expect("Execution failed");
+        let (result, errs) = crate::execute(doc, None, &schema, &Variables::new(), &())
+            .await
+            .expect("Execution failed");
 
         assert_eq!(errs, []);
 

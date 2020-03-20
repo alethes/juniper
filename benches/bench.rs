@@ -3,12 +3,16 @@ extern crate juniper;
 
 use bencher::Bencher;
 
-use juniper::{execute, RootNode, EmptyMutation, Variables};
+use juniper::{execute_sync, RootNode, EmptyMutation, EmptySubscription, Variables};
 use juniper::tests::model::Database;
 
 fn query_type_name(b: &mut Bencher) {
     let database = Database::new();
-    let schema = RootNode::new(&database, EmptyMutation::<Database>::new());
+    let schema = RootNode::new(
+        &database,
+        EmptyMutation::<Database>::new(),
+        EmptySubscription::<Database>::new()
+    );
 
     let doc = r#"
         query IntrospectionQueryTypeQuery {
@@ -19,12 +23,16 @@ fn query_type_name(b: &mut Bencher) {
           }
         }"#;
 
-    b.iter(|| execute(doc, None, &schema, &Variables::new(), &database));
+    b.iter(|| execute_sync(doc, None, &schema, &Variables::new(), &database));
 }
 
 fn introspection_query(b: &mut Bencher) {
     let database = Database::new();
-    let schema = RootNode::new(&database, EmptyMutation::<Database>::new());
+    let schema = RootNode::new(
+        &database,
+        EmptyMutation::<Database>::new(),
+        EmptySubscription::<Database>::new(),
+    );
 
     let doc = r#"
   query IntrospectionQuery {
@@ -120,7 +128,7 @@ fn introspection_query(b: &mut Bencher) {
   }
 "#;
 
-    b.iter(|| execute(doc, None, &schema, &Variables::new(), &database));
+    b.iter(|| execute_sync(doc, None, &schema, &Variables::new(), &database));
 }
 
 benchmark_group!(queries, query_type_name, introspection_query);
