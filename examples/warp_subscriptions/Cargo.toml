@@ -14,6 +14,15 @@ serde_json = "1.0"
 tokio = { version = "0.2", features = ["rt-core", "macros"] }
 warp = "0.2.1"
 
-juniper = { git = "https://github.com/graphql-rust/juniper" }
-juniper_subscriptions = { git = "https://github.com/graphql-rust/juniper" }
-juniper_warp = { git = "https://github.com/graphql-rust/juniper", features = ["subscriptions"] }
+# TODO#433: get crates from GitHub
+juniper = { path = "../../juniper" }
+juniper_subscriptions = { path = "../../juniper_subscriptions"}
+juniper_warp = { path = "../../juniper_warp", features = ["subscriptions"] }
+redis = { git = "https://github.com/mitsuhiko/redis-rs" }
+# r2d2_redis = { git = "https://github.com/Togedo/r2d2-redis" }
+async-stream = "0.2.1"
+r2d2 = "0.8.8"
+async-trait = "0.1.24"
+mobc-redis = { git = "https://github.com/Togedo/mobc-redis" }
+mobc = "0.5.4"
+lazy_static = "1.4.0"

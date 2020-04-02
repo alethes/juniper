@@ -1,12 +1,101 @@
 //! This example demonstrates asynchronous subscriptions with warp and tokio 0.2
+#[macro_use]
+extern crate lazy_static;
+extern crate redis;
 
-use std::{pin::Pin, sync::Arc, time::Duration};
-
-use futures::{Future, FutureExt as _, Stream};
+use std::{pin::Pin, sync::{Arc, Mutex}, time::Duration};
+use futures::{Future, FutureExt as _, Stream, stream::StreamExt};
 use juniper::{DefaultScalarValue, EmptyMutation, FieldError, RootNode};
 use juniper_subscriptions::Coordinator;
 use juniper_warp::{playground_filter, subscriptions::graphql_subscriptions};
 use warp::{http::Response, Filter};
+// use redis::Commands;
+use std::collections::HashMap;
+use std::sync::mpsc::{Sender};
+
+lazy_static! {
+    // static ref REDIS_CLIENT: redis::Client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    static ref SUB_MAP: SubManager = SubManager::new();
+}
+
+type SubStream = Pin<Box<dyn Stream<Item = ()> + Send>>;
+
+struct A {
+    pubsub: Arc<Mutex<redis::aio::PubSub>>,
+    stream: SubStream
+}
+
+impl A {
+    fn new(pubsub: Arc<Mutex<redis::aio::PubSub>>) -> A {
+        let o = pubsub.to_owned();
+        let m = o.lock().unwrap();
+        A {
+            pubsub,
+            stream: Box::pin(m.on_message::<'static>().map(move |_m| {
+                // let _ = pc;
+                // let am = Arc::new(m);
+                // match subs.get(&mchannel) {
+                //     Some(subs) => {
+                //         for s in subs {
+                //             let amc = am.clone();
+                //             s.send(amc);
+                //         }
+                //     },
+                //     None => {
+
+                //     }
+                // }
+            }))
+        }
+    }
+}
+
+struct SubManager {
+    client: redis::Client,
+    pubsubs: HashMap<String, Arc<Mutex<redis::aio::PubSub>>>,
+    streams: HashMap<String, A>,
+    stream_senders: HashMap<String, Sender<Sender<redis::Msg>>>
+    // subscribers: HashMap<String, Vec<Sender<Arc<redis::Msg>>>>
+}
+
+// unsafe impl Sync for redis::aio::PubSub {}
+
+impl SubManager {
+    fn new() -> SubManager {
+        let client = redis::Client::open("redis://127.0.0.1/").unwrap();
+        SubManager {
+            client,
+            pubsubs: HashMap::new(),
+            streams: HashMap::new(),
+            stream_senders: HashMap::new()
+            // subscribers: HashMap::new()
+        }
+    }
+    async fn subscribe(&'static mut self, channel: String) {
+        if let None = self.streams.get(&channel) {
+            let pubsub = Arc::new(Mutex::new(async {
+                let mut p = self.client.get_async_connection().await.unwrap().into_pubsub();
+                p.subscribe(&channel).await;
+                p
+            }.await));
+            self.pubsubs.insert(channel.clone(), pubsub.clone());
+            let pc = pubsub.clone();
+            let _mchannel = channel.clone();
+            // let subs = self.subscribers;
+            self.streams.insert(channel, A::new(pc));
+        }
+    }
+    // async fn get_pubsub(&mut self, channel: String, mapper: fn(redis::Msg) -> Result<T, FieldError>) -> &SubStream {
+    //     self.subscribe(channel.clone(), mapper);
+    //     self.pubsubs.get(&channel).unwrap()
+    // }
+    // async fn get_stream(&'static mut self, channel: String, mapper: fn(redis::Msg) -> Result<T, FieldError>) -> SubStream {
+    //     let stream = self.get_pubsub(channel, mapper);
+    //     Box::pin(stream)
+    // }
+}
+
+unsafe impl Sync for SubManager {}
 
 #[derive(Clone)]
 struct Context {}
@@ -98,13 +187,11 @@ impl Query {
     }
 }
 
-type UsersStream = Pin<Box<dyn Stream<Item = Result<User, FieldError>> + Send>>;
-
 struct Subscription;
 
 #[juniper::graphql_subscription(Context = Context)]
 impl Subscription {
-    async fn users() -> UsersStream {
+    async fn users() -> Pin<Box<dyn Stream<Item = Result<User, FieldError>> + Send>> {
         let mut counter = 0;
         let stream = tokio::time::interval(Duration::from_secs(5)).map(move |_| {
             counter += 1;
