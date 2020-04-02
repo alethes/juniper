@@ -144,9 +144,7 @@ async fn main() {
     let homepage = warp::path::end().map(|| {
         Response::builder()
             .header("content-type", "text/html")
-            .body(format!(
-                "<html><h1>juniper_subscriptions demo</h1><div>visit <a href=\"/playground\">graphql playground</a></html>"
-            ))
+            .body("<html><h1>juniper_subscriptions demo</h1><div>visit <a href=\"/playground\">graphql playground</a></html>".to_string())
     });
 
     let qm_schema = schema();
@@ -167,10 +165,20 @@ async fn main() {
              ctx: Context,
              coordinator: Arc<Coordinator<'static, _, _, _, _, _>>| {
                 ws.on_upgrade(|websocket| -> Pin<Box<dyn Future<Output = ()> + Send>> {
-                    graphql_subscriptions(websocket, coordinator, ctx).boxed()
+                    graphql_subscriptions(websocket, coordinator, ctx)
+                        .map(|r| {
+                            if let Err(e) = r {
+                                println!("Websocket error: {}", e);
+                            }
+                        })
+                        .boxed()
                 })
             },
         ))
+    .map(|reply| {
+        // TODO#584: remove this workaround
+        warp::reply::with_header(reply, "Sec-WebSocket-Protocol", "graphql-ws")
+    })
     .or(warp::post()
         .and(warp::path("graphql"))
         .and(qm_graphql_filter))
