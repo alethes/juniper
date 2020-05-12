@@ -3,7 +3,6 @@ extern crate juniper;
 extern crate juniper_iron;
 extern crate logger;
 extern crate mount;
-extern crate serde;
 
 use std::env;
 
@@ -29,7 +28,7 @@ fn main() {
         EmptyMutation::<Database>::new(),
         EmptySubscription::<Database>::new(),
     );
-    let graphiql_endpoint = GraphiQLHandler::new("/graphql");
+    let graphiql_endpoint = GraphiQLHandler::new("/graphql", None);
 
     mount.mount("/", graphiql_endpoint);
     mount.mount("/graphql", graphql_endpoint);

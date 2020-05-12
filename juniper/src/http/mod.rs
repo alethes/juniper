@@ -4,10 +4,10 @@ pub mod graphiql;
 pub mod playground;
 
 use serde::{
-    de::Deserialize,
-    ser::{self, Serialize, SerializeMap},
+    de,
+    ser::{self, SerializeMap},
+    Deserialize, Serialize,
 };
-use serde_derive::{Deserialize, Serialize};
 
 use crate::{
     ast::InputValue,
@@ -154,6 +154,7 @@ where
 /// This struct implements Serialize, so you can simply serialize this
 /// to JSON and send it over the wire. Use the `is_ok` method to determine
 /// whether to send a 200 or 400 HTTP status code.
+#[derive(Debug)]
 pub struct GraphQLResponse<'a, S = DefaultScalarValue>(
     Result<(Value<S>, Vec<ExecutionError<S>>), GraphQLError<'a>>,
 );
@@ -216,6 +217,142 @@ where
     }
 }
 
+/// Simple wrapper around GraphQLRequest to allow the handling of Batch requests.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+#[serde(bound = "InputValue<S>: Deserialize<'de>")]
+pub enum GraphQLBatchRequest<S = DefaultScalarValue>
+where
+    S: ScalarValue,
+{
+    /// A single operation request.
+    Single(GraphQLRequest<S>),
+
+    /// A batch operation request.
+    ///
+    /// Empty batch is considered as invalid value, so cannot be deserialized.
+    #[serde(deserialize_with = "deserialize_non_empty_vec")]
+    Batch(Vec<GraphQLRequest<S>>),
+}
+
+fn deserialize_non_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: de::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    use de::Error as _;
+
+    let v = Vec::<T>::deserialize(deserializer)?;
+    if v.is_empty() {
+        Err(D::Error::invalid_length(0, &"a positive integer"))
+    } else {
+        Ok(v)
+    }
+}
+
+impl<S> GraphQLBatchRequest<S>
+where
+    S: ScalarValue,
+{
+    /// Execute a GraphQL batch request synchronously using the specified schema and context
+    ///
+    /// This is a simple wrapper around the `execute_sync` function exposed in GraphQLRequest.
+    pub fn execute_sync<'a, CtxT, QueryT, MutationT, SubscriptionT>(
+        &'a self,
+        root_node: &'a crate::RootNode<QueryT, MutationT, SubscriptionT, S>,
+        context: &CtxT,
+    ) -> GraphQLBatchResponse<'a, S>
+    where
+        QueryT: crate::GraphQLType<S, Context = CtxT>,
+        MutationT: crate::GraphQLType<S, Context = CtxT>,
+        SubscriptionT: crate::GraphQLType<S, Context = CtxT>,
+    {
+        match *self {
+            Self::Single(ref req) => {
+                GraphQLBatchResponse::Single(req.execute_sync(root_node, context))
+            }
+            Self::Batch(ref reqs) => GraphQLBatchResponse::Batch(
+                reqs.iter()
+                    .map(|req| req.execute_sync(root_node, context))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Executes a GraphQL request using the specified schema and context
+    ///
+    /// This is a simple wrapper around the `execute` function exposed in
+    /// GraphQLRequest
+    pub async fn execute<'a, CtxT, QueryT, MutationT, SubscriptionT>(
+        &'a self,
+        root_node: &'a crate::RootNode<'a, QueryT, MutationT, SubscriptionT, S>,
+        context: &'a CtxT,
+    ) -> GraphQLBatchResponse<'a, S>
+    where
+        QueryT: crate::GraphQLTypeAsync<S, Context = CtxT> + Send + Sync,
+        QueryT::TypeInfo: Send + Sync,
+        MutationT: crate::GraphQLTypeAsync<S, Context = CtxT> + Send + Sync,
+        MutationT::TypeInfo: Send + Sync,
+        SubscriptionT: crate::GraphQLSubscriptionType<S, Context = CtxT> + Send + Sync,
+        SubscriptionT::TypeInfo: Send + Sync,
+        CtxT: Send + Sync,
+        S: Send + Sync,
+    {
+        match *self {
+            Self::Single(ref req) => {
+                let resp = req.execute(root_node, context).await;
+                GraphQLBatchResponse::Single(resp)
+            }
+            Self::Batch(ref reqs) => {
+                let resps = futures::future::join_all(
+                    reqs.iter().map(|req| req.execute(root_node, context)),
+                )
+                .await;
+                GraphQLBatchResponse::Batch(resps)
+            }
+        }
+    }
+
+    /// The operation names of the request.
+    pub fn operation_names(&self) -> Vec<Option<&str>> {
+        match self {
+            Self::Single(req) => vec![req.operation_name()],
+            Self::Batch(reqs) => reqs.iter().map(|req| req.operation_name()).collect(),
+        }
+    }
+}
+
+/// Simple wrapper around the result (GraphQLResponse) from executing a GraphQLBatchRequest
+///
+/// This struct implements Serialize, so you can simply serialize this
+/// to JSON and send it over the wire. use the `is_ok` to determine
+/// wheter to send a 200 or 400 HTTP status code.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum GraphQLBatchResponse<'a, S = DefaultScalarValue>
+where
+    S: ScalarValue,
+{
+    /// Result of a single operation in a GraphQL request.
+    Single(GraphQLResponse<'a, S>),
+    /// Result of a batch operation in a GraphQL request.
+    Batch(Vec<GraphQLResponse<'a, S>>),
+}
+
+impl<'a, S> GraphQLBatchResponse<'a, S>
+where
+    S: ScalarValue,
+{
+    /// Returns if all the GraphQLResponse in this operation are ok,
+    /// you can use it to determine wheter to send a 200 or 400 HTTP status code.
+    pub fn is_ok(&self) -> bool {
+        match self {
+            Self::Single(resp) => resp.is_ok(),
+            Self::Batch(resps) => resps.iter().all(GraphQLResponse::is_ok),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "expose-test-schema"))]
 #[allow(missing_docs)]
 pub mod tests {
@@ -230,15 +367,23 @@ pub mod tests {
         pub content_type: String,
     }
 
-    /// Normalized way to make requests to the http framework
-    /// integration we are testing.
-    pub trait HTTPIntegration {
+    /// Normalized way to make requests to the HTTP framework integration we are testing.
+    pub trait HttpIntegration {
+        /// Sends GET HTTP request to this integration with the provided `url` parameters string,
+        /// and returns response returned by this integration.
         fn get(&self, url: &str) -> TestResponse;
-        fn post(&self, url: &str, body: &str) -> TestResponse;
+
+        /// Sends POST HTTP request to this integration with the provided JSON-encoded `body`, and
+        /// returns response returned by this integration.
+        fn post_json(&self, url: &str, body: &str) -> TestResponse;
+
+        /// Sends POST HTTP request to this integration with the provided raw GraphQL query as
+        /// `body`, and returns response returned by this integration.
+        fn post_graphql(&self, url: &str, body: &str) -> TestResponse;
     }
 
     #[allow(missing_docs)]
-    pub fn run_http_test_suite<T: HTTPIntegration>(integration: &T) {
+    pub fn run_http_test_suite<T: HttpIntegration>(integration: &T) {
         println!("Running HTTP Test suite for integration");
 
         println!("  - test_simple_get");
@@ -256,6 +401,9 @@ pub mod tests {
         println!("  - test_batched_post");
         test_batched_post(integration);
 
+        println!("  - test_empty_batched_post");
+        test_empty_batched_post(integration);
+
         println!("  - test_invalid_json");
         test_invalid_json(integration);
 
@@ -264,6 +412,12 @@ pub mod tests {
 
         println!("  - test_duplicate_keys");
         test_duplicate_keys(integration);
+
+        println!("  - test_graphql_post");
+        test_graphql_post(integration);
+
+        println!("  - test_invalid_graphql_post");
+        test_invalid_graphql_post(integration);
     }
 
     fn unwrap_json_response(response: &TestResponse) -> Json {
@@ -276,7 +430,7 @@ pub mod tests {
         .expect("Could not parse JSON object")
     }
 
-    fn test_simple_get<T: HTTPIntegration>(integration: &T) {
+    fn test_simple_get<T: HttpIntegration>(integration: &T) {
         // {hero{name}}
         let response = integration.get("/?query=%7Bhero%7Bname%7D%7D");
 
@@ -290,7 +444,7 @@ pub mod tests {
         );
     }
 
-    fn test_encoded_get<T: HTTPIntegration>(integration: &T) {
+    fn test_encoded_get<T: HttpIntegration>(integration: &T) {
         // query { human(id: "1000") { id, name, appearsIn, homePlanet } }
         let response = integration.get(
             "/?query=query%20%7B%20human(id%3A%20%221000%22)%20%7B%20id%2C%20name%2C%20appearsIn%2C%20homePlanet%20%7D%20%7D");
@@ -320,7 +474,7 @@ pub mod tests {
         );
     }
 
-    fn test_get_with_variables<T: HTTPIntegration>(integration: &T) {
+    fn test_get_with_variables<T: HttpIntegration>(integration: &T) {
         // query($id: String!) { human(id: $id) { id, name, appearsIn, homePlanet } }
         // with variables = { "id": "1000" }
         let response = integration.get(
@@ -351,8 +505,8 @@ pub mod tests {
         );
     }
 
-    fn test_simple_post<T: HTTPIntegration>(integration: &T) {
-        let response = integration.post("/", r#"{"query": "{hero{name}}"}"#);
+    fn test_simple_post<T: HttpIntegration>(integration: &T) {
+        let response = integration.post_json("/", r#"{"query": "{hero{name}}"}"#);
 
         assert_eq!(response.status_code, 200);
         assert_eq!(response.content_type, "application/json");
@@ -360,12 +514,12 @@ pub mod tests {
         assert_eq!(
             unwrap_json_response(&response),
             serde_json::from_str::<Json>(r#"{"data": {"hero": {"name": "R2-D2"}}}"#)
-                .expect("Invalid JSON constant in test")
+                .expect("Invalid JSON constant in test"),
         );
     }
 
-    fn test_batched_post<T: HTTPIntegration>(integration: &T) {
-        let response = integration.post(
+    fn test_batched_post<T: HttpIntegration>(integration: &T) {
+        let response = integration.post_json(
             "/",
             r#"[{"query": "{hero{name}}"}, {"query": "{hero{name}}"}]"#,
         );
@@ -376,37 +530,57 @@ pub mod tests {
         assert_eq!(
             unwrap_json_response(&response),
             serde_json::from_str::<Json>(
-                r#"[{"data": {"hero": {"name": "R2-D2"}}}, {"data": {"hero": {"name": "R2-D2"}}}]"#
+                r#"[{"data": {"hero": {"name": "R2-D2"}}}, {"data": {"hero": {"name": "R2-D2"}}}]"#,
             )
-            .expect("Invalid JSON constant in test")
+            .expect("Invalid JSON constant in test"),
         );
     }
 
-    fn test_invalid_json<T: HTTPIntegration>(integration: &T) {
-        let response = integration.get("/?query=blah");
-        assert_eq!(response.status_code, 400);
-        let response = integration.post("/", r#"blah"#);
+    fn test_empty_batched_post<T: HttpIntegration>(integration: &T) {
+        let response = integration.post_json("/", "[]");
         assert_eq!(response.status_code, 400);
     }
 
-    fn test_invalid_field<T: HTTPIntegration>(integration: &T) {
+    fn test_invalid_json<T: HttpIntegration>(integration: &T) {
+        let response = integration.get("/?query=blah");
+        assert_eq!(response.status_code, 400);
+        let response = integration.post_json("/", r#"blah"#);
+        assert_eq!(response.status_code, 400);
+    }
+
+    fn test_invalid_field<T: HttpIntegration>(integration: &T) {
         // {hero{blah}}
         let response = integration.get("/?query=%7Bhero%7Bblah%7D%7D");
         assert_eq!(response.status_code, 400);
-        let response = integration.post("/", r#"{"query": "{hero{blah}}"}"#);
+        let response = integration.post_json("/", r#"{"query": "{hero{blah}}"}"#);
         assert_eq!(response.status_code, 400);
     }
 
-    fn test_duplicate_keys<T: HTTPIntegration>(integration: &T) {
+    fn test_duplicate_keys<T: HttpIntegration>(integration: &T) {
         // {hero{name}}
         let response = integration.get("/?query=%7B%22query%22%3A%20%22%7Bhero%7Bname%7D%7D%22%2C%20%22query%22%3A%20%22%7Bhero%7Bname%7D%7D%22%7D");
         assert_eq!(response.status_code, 400);
-        let response = integration.post(
-            "/",
-            r#"
-            {"query": "{hero{name}}", "query": "{hero{name}}"}
-        "#,
-        );
+        let response =
+            integration.post_json("/", r#"{"query": "{hero{name}}", "query": "{hero{name}}"}"#);
         assert_eq!(response.status_code, 400);
+    }
+
+    fn test_graphql_post<T: HttpIntegration>(integration: &T) {
+        let resp = integration.post_graphql("/", r#"{hero{name}}"#);
+
+        assert_eq!(resp.status_code, 200);
+        assert_eq!(resp.content_type, "application/json");
+
+        assert_eq!(
+            unwrap_json_response(&resp),
+            serde_json::from_str::<Json>(r#"{"data": {"hero": {"name": "R2-D2"}}}"#)
+                .expect("Invalid JSON constant in test"),
+        );
+    }
+
+    fn test_invalid_graphql_post<T: HttpIntegration>(integration: &T) {
+        let resp = integration.post_graphql("/", r#"{hero{name}"#);
+
+        assert_eq!(resp.status_code, 400);
     }
 }

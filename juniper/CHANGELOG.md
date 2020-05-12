@@ -18,11 +18,28 @@ See [#419](https://github.com/graphql-rust/juniper/pull/419).
 - `SchemaType` is now public
   - This is helpful when using `context.getSchema()` inside of your field resolvers
 
+- Support subscriptions in GraphiQL
+
 See [#569](https://github.com/graphql-rust/juniper/pull/569).
+
+- GraphQLUnion derive support ("#[derive(GraphqQLUnion)]")
+  - implements GraphQLAsyncType
+
+See [#618](https://github.com/graphql-rust/juniper/pull/618).
+
+- Derive macro `GraphQLEnum` supports custom context (see [#621](https://github.com/graphql-rust/juniper/pull/621))
+
+- Better error messages for all proc macros (see
+  [#631](https://github.com/graphql-rust/juniper/pull/631)
 
 ## Breaking Changes
 
+- `juniper::graphiql` has moved to `juniper::http::graphiql`
+  - `juniper::http::graphiql::graphiql_source` now requies a second parameter for subscriptions
+
 - remove old `graphql_object!` macro, rename `object` proc macro to `graphql_object`
+
+- remove old `graphql_scalar!` macro, rename `scalar` proc macro to `graphql_scalar`
 
 - Remove deprecated `ScalarValue` custom derive (renamed to GraphQLScalarValue)
 
@@ -39,6 +56,20 @@ See [#569](https://github.com/graphql-rust/juniper/pull/569).
 - Subscription-related: 
   add subscription type to `RootNode`,
   add subscription endpoint to `playground_source()`
+
+- Putting a scalar type into a string is not allowed anymore, e..g,
+  `#[graphql(scalar = "DefaultScalarValue")]`. Only
+  `#[derive(GraphQLInputObject)]` supported this syntax. The
+  refactoring of GraphQLInputObject allowed to drop the support
+  (see [#631](https://github.com/graphql-rust/juniper/pull/631)).
+
+- Support for renaming arguments within an GraphQL object
+  `#[graphql(arguments(argA(name = "test")))]`
+  (see [#631](https://github.com/graphql-rust/juniper/pull/631))
+
+- Integration tests:
+  Rename `http::tests::HTTPIntegration` as `http::tests::HttpIntegration`
+  and add support for `application/graphql` POST request.
 
 # [[0.14.2] 2019-12-16](https://github.com/graphql-rust/juniper/releases/tag/juniper-0.14.2)
 

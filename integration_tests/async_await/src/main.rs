@@ -1,5 +1,5 @@
 #[cfg(test)]
-use juniper::{graphql_value, GraphQLError, RootNode, Value};
+use juniper::{graphql_value, EmptyMutation, EmptySubscription, GraphQLError, RootNode, Value};
 
 #[derive(juniper::GraphQLEnum)]
 enum UserKind {
@@ -71,24 +71,14 @@ impl Query {
     }
 }
 
-struct Mutation;
-
-#[juniper::graphql_object]
-impl Mutation {}
-
-struct Subscription;
-
-#[juniper::graphql_subscription]
-impl Subscription {}
-
 #[tokio::test]
 async fn async_simple() {
-    let schema = RootNode::new(Query, Mutation, Subscription);
+    let schema = RootNode::new(Query, EmptyMutation::new(), EmptySubscription::new());
     let doc = r#"
-        query { 
+        query {
             fieldSync
-            fieldAsyncPlain 
-            delayed  
+            fieldAsyncPlain
+            delayed
             user(id: "user1") {
                 kind
                 name
@@ -125,7 +115,7 @@ async fn async_simple() {
 
 #[tokio::test]
 async fn async_field_validation_error() {
-    let schema = RootNode::new(Query, Mutation, Subscription);
+    let schema = RootNode::new(Query, EmptyMutation::new(), EmptySubscription::new());
     let doc = r#"
         query {
             nonExistentField
@@ -151,5 +141,26 @@ async fn async_field_validation_error() {
     };
     assert!(is_validation_error);
 }
+
+// FIXME: test seems broken by design, re-enable later
+// #[tokio::test]
+// async fn resolve_into_stream_validation_error() {
+//     let schema = RootNode::new(Query, EmptyMutation::new(), EmptySubscription::new());
+//     let doc = r#"
+//         subscription {
+//             nonExistent
+//         }
+//     "#;
+//     let vars = Default::default();
+//     let result = juniper::resolve_into_stream(doc, None, &schema, &vars, &()).await;
+//     assert!(result.is_err());
+
+//     let error = result.err().unwrap();
+//     let is_validation_error = match error {
+//         GraphQLError::ValidationError(_) => true,
+//         _ => false,
+//     };
+//     assert!(is_validation_error);
+// }
 
 fn main() {}
